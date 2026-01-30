@@ -1,4 +1,10 @@
+
+rom __future__ import annotations
+
 import streamlit as st
+# altri import...
+
+st.title("App funzionante 🎉")
 
 st.title("App attiva")
 st.write("Se leggi questo, Streamlit funziona")
