@@ -10,6 +10,26 @@ from typing import Dict, List, Literal, Optional, Tuple
 import math
 
 Zone = Literal["A", "B", "C", "D", "E", "F"]
+import streamlit as st
+
+def check_password():
+    def password_entered():
+        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        st.text_input("Password", type="password", key="password", on_change=password_entered)
+        st.stop()
+
+    elif not st.session_state["password_correct"]:
+        st.text_input("Password", type="password", key="password", on_change=password_entered)
+        st.error("Password errata")
+        st.stop()
+
+check_password()
 
 # -----------------------------
 # Helpers
