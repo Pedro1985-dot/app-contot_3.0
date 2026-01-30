@@ -4,7 +4,7 @@ import streamlit as st
 
 st.title("App attiva")
 st.write("Se leggi questo, Streamlit funziona")
-from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Tuple
 import math
