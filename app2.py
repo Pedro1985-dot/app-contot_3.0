@@ -499,36 +499,343 @@ def calc_ev(
         notes=notes
     )
 
+# =============================
+# STREAMLIT UI (PROFESSIONALE)
+# =============================
+
+import json
+from dataclasses import asdict
+
+st.set_page_config(
+    page_title="Calcolatore Conto Termico 3.0",
+    page_icon="🧮",
+    layout="wide",
+)
+
+def _eur(x: float) -> str:
+    return f"{x:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def _safe_run(fn):
+    """Esegue fn() e gestisce errori mostrando messaggio UI pulito."""
+    try:
+        return fn(), None
+    except Exception as e:
+        return None, str(e)
+
+def _result_block(res: "Result"):
+    # KPI in alto
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Incentivo totale", _eur(res.total_incentive_eur))
+    c2.metric("Numero rate", str(res.n_rates))
+    c3.metric("Importo rata", _eur(res.annual_rate_eur))
+
+    # Note
+    if res.notes:
+        st.info("**Note:**\n\n" + "\n".join([f"- {n}" for n in res.notes]))
+
+    # Dettagli (collassabile)
+    with st.expander("Vedi dettagli di calcolo"):
+        st.json(res.details)
+
+    # Download JSON del risultato
+    payload = asdict(res)
+    st.download_button(
+        "⬇️ Scarica risultato (JSON)",
+        data=json.dumps(payload, indent=2, ensure_ascii=False),
+        file_name="risultato_conto_termico.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+
 # -----------------------------
-# ESEMPIO RAPIDO
+# Header
 # -----------------------------
-if __name__ == "__main__":
-    # Esempio: PDC aria/acqua 10 kW in zona D con SCOP 4.0, kp=1
-    pdc = calc_pdc_elettrica(zone="D", pdc_type="aria_acqua", prated_kw=10, scop=4.0, kp=1.0)
-    print(pdc)
+st.title("Calcolatore Conto Termico 3.0")
+st.caption("Versione Streamlit — prototipo professionale (input guidati + risultati + export).")
 
-    # Ibrido factory made (caldaia 24 kW), stessa PDC
-    hyb = calc_ibrido(zone="D", system_type="ibrido_factory_made", boiler_pn_kw=24,
-                      pdc_type="aria_acqua", prated_kw=10, scop=4.0, kp=1.0)
-    print(hyb)
+# -----------------------------
+# Sidebar: impostazioni generali
+# -----------------------------
+with st.sidebar:
+    st.header("Impostazioni")
+    zone = st.selectbox("Zona climatica", ["A","B","C","D","E","F"], index=3)
 
-    # Biomassa: caldaia 30 kW in zona E, riduzione PP 30%
-    bio = calc_biomassa(zone="E", device="caldaia", pn_kw=30, reduction_pp_percent=30)
-    print(bio)
+    st.divider()
+    st.subheader("Output")
+    show_details_default = st.checkbox("Mostra dettagli automaticamente", value=False)
+    st.caption("Suggerimento: lascia OFF per un output pulito e veloce.")
 
-    # Solare termico ACS: 20 m2, 10 moduli da 2 m2, Qcol 1200 kWht/anno per modulo
-    sol = calc_solare_termico(application="acs", sl_m2=20, modules_n=10, module_ag_m2=2.0,
-                              collector_kind="piano_sottovuoto", q_kwh_per_year_per_module=1200)
-    print(sol)
+# -----------------------------
+# Tabs
+# -----------------------------
+tab_pdc, tab_ibrido, tab_biomassa, tab_solare, tab_pv, tab_ev = st.tabs(
+    ["PDC elettrica", "Ibrido/Bivalente", "Biomassa", "Solare termico", "FV + Accumulo", "EV Charging"]
+)
 
-    # FV add-on: 6 kW, costo 9.000 €, accumulo 10 kWh costo 6.000 €, bonus 10pp
-    pv = calc_pv_accumulo(pdc_total_incentive_eur=pdc.total_incentive_eur,
-                          p_pv_kw=6, cost_pv_eur=9000,
-                          storage_kwh=10, cost_storage_eur=6000,
-                          bonus_pp=10, public_building_100pct=False)
-    print(pv)
+# =============================
+# TAB 1 — PDC
+# =============================
+with tab_pdc:
+    st.subheader("Pompa di Calore Elettrica")
 
-    # EV: wallbox trifase (A_tri) costo 3.000 €
-    ev = calc_ev(pdc_total_incentive_eur=pdc.total_incentive_eur,
-                 eligible_cost_eur=3000, category="A_tri")
-    print(ev)
+    colA, colB, colC = st.columns([1.2, 1, 1])
+    with colA:
+        pdc_type = st.selectbox(
+            "Tipo PDC (Tabella 9)",
+            [
+                "aria_acqua",
+                "aria_aria_split",
+                "aria_aria_vrf",
+                "aria_aria_rooftop",
+                "acqua_aria",
+                "acqua_acqua",
+                "salamoia_aria",
+                "salamoia_acqua",
+                "fixed_double_duct",
+            ],
+            index=0,
+        )
+        prated_kw = st.number_input("Prated (kW)", min_value=0.1, value=10.0, step=0.1)
+
+    with colB:
+        kp = st.number_input("kp", min_value=0.1, value=1.0, step=0.1)
+
+    with colC:
+        scop = None
+        cop35 = None
+        if pdc_type == "fixed_double_duct":
+            cop35 = st.number_input("COP35 (solo fixed_double_duct)", min_value=1.1, value=3.2, step=0.1)
+            st.caption("Per fixed_double_duct il codice usa kp=2.6 come da Regole.")
+        else:
+            scop = st.number_input("SCOP", min_value=1.1, value=4.0, step=0.1)
+
+    run = st.button("Calcola PDC", type="primary", use_container_width=True)
+
+    if run:
+        res, err = _safe_run(lambda: calc_pdc_elettrica(
+            zone=zone,
+            pdc_type=pdc_type,
+            prated_kw=prated_kw,
+            scop=scop,
+            kp=kp,
+            cop35=cop35
+        ))
+        if err:
+            st.error(err)
+        else:
+            st.success("Calcolo completato.")
+            _result_block(res)
+            if show_details_default:
+                st.json(res.details)
+
+# =============================
+# TAB 2 — IBRIDO/BIVALENTE
+# =============================
+with tab_ibrido:
+    st.subheader("Sistema ibrido / bivalente (add-on)")
+
+    colA, colB = st.columns([1.2, 1])
+    with colA:
+        system_type = st.selectbox("Tipologia", ["ibrido_factory_made", "bivalente_addon"], index=0)
+        boiler_pn_kw = st.number_input("Pn caldaia (kW)", min_value=0.1, value=24.0, step=0.1)
+        pdc_type = st.selectbox(
+            "Tipo PDC",
+            [
+                "aria_acqua",
+                "aria_aria_split",
+                "aria_aria_vrf",
+                "aria_aria_rooftop",
+                "acqua_aria",
+                "acqua_acqua",
+                "salamoia_aria",
+                "salamoia_acqua",
+                "fixed_double_duct",
+            ],
+            index=0,
+            key="hyb_pdc_type",
+        )
+        prated_kw = st.number_input("Prated PDC (kW)", min_value=0.1, value=10.0, step=0.1, key="hyb_prated")
+
+    with colB:
+        kp = st.number_input("kp", min_value=0.1, value=1.0, step=0.1, key="hyb_kp")
+        scop = None
+        cop35 = None
+        if pdc_type == "fixed_double_duct":
+            cop35 = st.number_input("COP35", min_value=1.1, value=3.2, step=0.1, key="hyb_cop35")
+        else:
+            scop = st.number_input("SCOP", min_value=1.1, value=4.0, step=0.1, key="hyb_scop")
+
+    run = st.button("Calcola Ibrido/Bivalente", type="primary", use_container_width=True)
+
+    if run:
+        res, err = _safe_run(lambda: calc_ibrido(
+            zone=zone,
+            system_type=system_type,
+            boiler_pn_kw=boiler_pn_kw,
+            pdc_type=pdc_type,
+            prated_kw=prated_kw,
+            scop=scop,
+            kp=kp,
+            cop35=cop35
+        ))
+        if err:
+            st.error(err)
+        else:
+            st.success("Calcolo completato.")
+            _result_block(res)
+
+# =============================
+# TAB 3 — BIOMASSA
+# =============================
+with tab_biomassa:
+    st.subheader("Generatori a Biomassa")
+
+    colA, colB, colC = st.columns([1.2, 1, 1])
+    with colA:
+        device = st.selectbox(
+            "Tipo generatore",
+            ["caldaia", "stufa_termocamino_legna", "stufa_termocamino_pellet"],
+            index=0
+        )
+    with colB:
+        pn_kw = st.number_input("Pn (kW)", min_value=0.1, value=30.0, step=0.1)
+    with colC:
+        red_pp = st.number_input("Riduzione PP (%)", min_value=0.0, value=30.0, step=1.0)
+
+    run = st.button("Calcola Biomassa", type="primary", use_container_width=True)
+
+    if run:
+        res, err = _safe_run(lambda: calc_biomassa(
+            zone=zone,
+            device=device,
+            pn_kw=pn_kw,
+            reduction_pp_percent=red_pp
+        ))
+        if err:
+            st.error(err)
+        else:
+            st.success("Calcolo completato.")
+            _result_block(res)
+
+# =============================
+# TAB 4 — SOLARE TERMICO
+# =============================
+with tab_solare:
+    st.subheader("Solare Termico")
+
+    colA, colB, colC = st.columns([1.2, 1, 1])
+    with colA:
+        application = st.selectbox(
+            "Applicazione",
+            ["acs", "acs_risc_bassaT_rete", "concentrazione", "solar_cooling"],
+            index=0
+        )
+        collector_kind = st.selectbox(
+            "Tipologia collettore",
+            ["piano_sottovuoto", "factory_made", "concentrazione"],
+            index=0
+        )
+
+    with colB:
+        modules_n = st.number_input("Numero moduli", min_value=1, value=10, step=1)
+        module_ag = st.number_input("Ag modulo (m²)", min_value=0.1, value=2.0, step=0.1)
+
+    with colC:
+        sl = st.number_input("Sl totale (m²)", min_value=0.1, value=float(modules_n) * float(module_ag), step=0.1)
+
+    st.caption("Se Sl non coincide con moduli×Ag, l’app lo segnala nelle note (tolleranza 5%).")
+
+    q_kwh = None
+    ql_mj = None
+    if collector_kind == "factory_made":
+        ql_mj = st.number_input("QL (MJ/anno per modulo)", min_value=0.1, value=1325.0, step=1.0)
+    else:
+        q_kwh = st.number_input("Qcol/Qsol (kWht/anno per modulo)", min_value=0.1, value=1200.0, step=1.0)
+
+    run = st.button("Calcola Solare Termico", type="primary", use_container_width=True)
+
+    if run:
+        res, err = _safe_run(lambda: calc_solare_termico(
+            application=application,
+            sl_m2=sl,
+            modules_n=modules_n,
+            module_ag_m2=module_ag,
+            collector_kind=collector_kind,
+            q_kwh_per_year_per_module=q_kwh,
+            ql_mj_per_year_per_module=ql_mj
+        ))
+        if err:
+            st.error(err)
+        else:
+            st.success("Calcolo completato.")
+            _result_block(res)
+
+# =============================
+# TAB 5 — FV + ACCUMULO (ADD-ON A PDC)
+# =============================
+with tab_pv:
+    st.subheader("Fotovoltaico + Accumulo (add-on a PDC)")
+    st.caption("Serve l’Itot del generatore principale (PDC) perché c’è il vincolo Imax = Itot PDC.")
+
+    colA, colB, colC = st.columns([1.2, 1, 1])
+    with colA:
+        pdc_itot = st.number_input("Itot PDC (€) — limite massimo", min_value=0.0, value=0.0, step=10.0)
+        public_100 = st.checkbox("Edificio pubblico (100% spesa)", value=False)
+    with colB:
+        p_pv = st.number_input("Potenza FV (kW)", min_value=0.1, value=6.0, step=0.1)
+        cost_pv = st.number_input("Costo FV (€)", min_value=0.0, value=9000.0, step=50.0)
+    with colC:
+        storage_kwh = st.number_input("Accumulo (kWh)", min_value=0.0, value=10.0, step=0.5)
+        cost_storage = st.number_input("Costo accumulo (€)", min_value=0.0, value=6000.0, step=50.0)
+
+    bonus_pp = st.selectbox("Bonus percentuale (punti %)", [0, 5, 10, 15], index=0)
+
+    run = st.button("Calcola FV + Accumulo", type="primary", use_container_width=True)
+
+    if run:
+        res, err = _safe_run(lambda: calc_pv_accumulo(
+            pdc_total_incentive_eur=pdc_itot,
+            p_pv_kw=p_pv,
+            cost_pv_eur=cost_pv,
+            storage_kwh=storage_kwh,
+            cost_storage_eur=cost_storage,
+            bonus_pp=int(bonus_pp),
+            public_building_100pct=public_100
+        ))
+        if err:
+            st.error(err)
+        else:
+            st.success("Calcolo completato.")
+            _result_block(res)
+
+# =============================
+# TAB 6 — EV CHARGING (ADD-ON A PDC)
+# =============================
+with tab_ev:
+    st.subheader("Ricarica veicoli elettrici (add-on a PDC)")
+    st.caption("Serve l’Itot del generatore principale (PDC) perché c’è il vincolo Imax = Itot PDC.")
+
+    colA, colB = st.columns([1.2, 1])
+    with colA:
+        pdc_itot = st.number_input("Itot PDC (€) — limite massimo", min_value=0.0, value=0.0, step=10.0, key="ev_itot")
+        eligible_cost = st.number_input("Costo ammissibile C (€)", min_value=0.0, value=3000.0, step=50.0)
+    with colB:
+        category = st.selectbox("Categoria", ["a_mono", "a_tri", "b_22_50", "b_50_100", "b_gt100"], index=1)
+        power_kw = None
+        if category == "b_22_50":
+            power_kw = st.number_input("Potenza infrastruttura (kW)", min_value=22.1, value=30.0, step=0.1)
+
+    run = st.button("Calcola EV Charging", type="primary", use_container_width=True)
+
+    if run:
+        res, err = _safe_run(lambda: calc_ev(
+            pdc_total_incentive_eur=pdc_itot,
+            eligible_cost_eur=eligible_cost,
+            category=category,
+            power_kw=power_kw
+        ))
+        if err:
+            st.error(err)
+        else:
+            st.success("Calcolo completato.")
+            _result_block(res)
